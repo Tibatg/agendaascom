@@ -4,15 +4,20 @@ import {
   HardDrive, 
   Printer, 
   FileText, 
+  FileDown,
   Calendar as CalendarIcon,
-  CheckCircle2
+  CheckCircle2,
+  SlidersHorizontal,
+  FileCheck
 } from 'lucide-react';
-import { Secretariat, MunicipalAction, ActionStatus } from '../types';
+import { Secretariat, MunicipalAction, ActionStatus, HeaderFooterConfig } from '../types';
 import { ACTION_STATUSES } from '../data/initialData';
+import { generateActionsReportPDF } from '../utils/pdfGenerator';
 
 interface RelatoriosTabProps {
   acoes: MunicipalAction[];
   secretarias: Secretariat[];
+  layoutConfig?: HeaderFooterConfig;
   getStatusBadge: (status: ActionStatus) => string;
   onToast: (text: string, type?: 'success' | 'error' | 'info') => void;
   onLogAudit: (acao: string, registro: string, tipo: any, detalhes?: string) => void;
@@ -21,6 +26,7 @@ interface RelatoriosTabProps {
 export const RelatoriosTab: React.FC<RelatoriosTabProps> = ({
   acoes,
   secretarias,
+  layoutConfig,
   getStatusBadge,
   onToast,
   onLogAudit
@@ -31,6 +37,8 @@ export const RelatoriosTab: React.FC<RelatoriosTabProps> = ({
   const [reportResponsavel, setReportResponsavel] = useState('todos');
   const [reportDateStart, setReportDateStart] = useState('');
   const [reportDateEnd, setReportDateEnd] = useState('');
+  const [pdfOrientation, setPdfOrientation] = useState<'portrait' | 'landscape'>('portrait');
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   const responsaveisList = useMemo(() => {
     const set = new Set<string>();
@@ -138,6 +146,64 @@ export const RelatoriosTab: React.FC<RelatoriosTabProps> = ({
     onToast('Relatório em JSON exportado com sucesso!', 'success');
   };
 
+  const handleExportPDF = () => {
+    if (reportActions.length === 0) {
+      onToast('Nenhuma ação encontrada para exportação em PDF.', 'error');
+      return;
+    }
+
+    try {
+      setIsGeneratingPdf(true);
+
+      const secObj = secretarias.find(s => s.id === reportSecretariaId);
+      const secretariaNome = reportSecretariaId === 'todas'
+        ? 'Todas as Secretarias Municipais'
+        : `${secObj?.sigla || ''} - ${secObj?.nome || 'Secretaria'}`;
+
+      const periodoStr = (reportDateStart || reportDateEnd)
+        ? `${reportDateStart ? reportDateStart.split('-').reverse().join('/') : 'Início'} até ${reportDateEnd ? reportDateEnd.split('-').reverse().join('/') : 'Atualidade'}`
+        : 'Todo o exercício / período';
+
+      const statusStr = reportStatus === 'todos' ? 'Todos os Status' : reportStatus;
+      const responsavelStr = reportResponsavel === 'todos' ? 'Todos os Responsáveis' : reportResponsavel;
+
+      generateActionsReportPDF({
+        acoes: reportActions,
+        secretarias,
+        reportType,
+        secretariaNome,
+        periodoStr,
+        statusStr,
+        responsavelStr,
+        layoutConfig,
+        orientation: pdfOrientation
+      });
+
+      onLogAudit(
+        'Relatório PDF emitido e baixado',
+        `Tipo: ${reportType} (${pdfOrientation})`,
+        'BACKUP',
+        `${reportActions.length} ações exportadas`
+      );
+      onToast('Relatório oficial em PDF baixado com sucesso!', 'success');
+    } catch (error) {
+      console.error('Erro ao gerar PDF:', error);
+      onToast('Não foi possível gerar o arquivo PDF. Tente novamente.', 'error');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
+  // Status counts for the filtered actions
+  const statusStats = useMemo(() => {
+    const counts: Record<string, number> = {};
+    ACTION_STATUSES.forEach(s => { counts[s] = 0; });
+    reportActions.forEach(a => {
+      counts[a.status] = (counts[a.status] || 0) + 1;
+    });
+    return counts;
+  }, [reportActions]);
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -149,28 +215,48 @@ export const RelatoriosTab: React.FC<RelatoriosTabProps> = ({
             Relatório de Demandas e Ações
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Gere relatórios consolidados com opções simplificada, detalhada, por secretaria e responsável
+            Gere relatórios consolidados oficiais em PDF, planilhas CSV e dados estruturados
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Main requested feature: Download PDF */}
           <button
+            id="btn-export-pdf"
+            onClick={handleExportPDF}
+            disabled={isGeneratingPdf || reportActions.length === 0}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-700 text-white shadow-md cursor-pointer transition-all active:scale-95 disabled:opacity-50"
+            title="Baixar Relatório Oficial em PDF formatado com timbrado institucional da Prefeitura"
+          >
+            <FileDown className="w-4 h-4" />
+            <span>{isGeneratingPdf ? 'Gerando PDF...' : 'Baixar PDF'}</span>
+          </button>
+
+          <button
+            id="btn-export-csv"
             onClick={handleExportCSV}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer transition-all"
+            title="Exportar dados para planilha Excel / CSV"
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>Baixar CSV</span>
           </button>
+
           <button
+            id="btn-export-json"
             onClick={handleExportJSON}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 shadow-xs cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 shadow-xs cursor-pointer transition-all"
+            title="Exportar arquivo estruturado JSON"
           >
             <HardDrive className="w-4 h-4" />
             <span>Baixar JSON</span>
           </button>
+
           <button
+            id="btn-print-report"
             onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-blue-700 hover:bg-blue-800 text-white shadow-xs cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-blue-700 hover:bg-blue-800 text-white shadow-xs cursor-pointer transition-all"
+            title="Imprimir visualização da página"
           >
             <Printer className="w-4 h-4" />
             <span>Imprimir</span>
@@ -180,13 +266,35 @@ export const RelatoriosTab: React.FC<RelatoriosTabProps> = ({
 
       {/* Parameters Selection */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4 text-xs">
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200 uppercase text-[11px]">
+            <SlidersHorizontal className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            <span>Filtros e Configurações de Emissão</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setReportSecretariaId('todas');
+              setReportType('simplificado');
+              setReportStatus('todos');
+              setReportResponsavel('todos');
+              setReportDateStart('');
+              setReportDateEnd('');
+              setPdfOrientation('portrait');
+            }}
+            className="text-[11px] text-blue-600 hover:underline dark:text-blue-400 font-semibold cursor-pointer"
+          >
+            Redefinir Filtros
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <div>
-            <label className="font-bold block mb-1">Secretaria Municipal</label>
+            <label className="font-bold block mb-1 text-slate-700 dark:text-slate-300">Secretaria</label>
             <select
               value={reportSecretariaId}
               onChange={(e) => setReportSecretariaId(e.target.value)}
-              className="w-full p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+              className="w-full p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
             >
               <option value="todas">🏛️ Todas as Secretarias</option>
               {secretarias.map(s => (
@@ -196,19 +304,19 @@ export const RelatoriosTab: React.FC<RelatoriosTabProps> = ({
           </div>
 
           <div>
-            <label className="font-bold block mb-1">Tipo de Relatório</label>
+            <label className="font-bold block mb-1 text-slate-700 dark:text-slate-300">Tipo de Conteúdo</label>
             <div className="grid grid-cols-2 gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
               <button
                 type="button"
                 onClick={() => setReportType('simplificado')}
-                className={`py-1.5 rounded-md font-bold text-center cursor-pointer ${reportType === 'simplificado' ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300' : 'text-slate-500'}`}
+                className={`py-1.5 rounded-md font-bold text-center cursor-pointer transition-all ${reportType === 'simplificado' ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-xs' : 'text-slate-500'}`}
               >
                 Simplificado
               </button>
               <button
                 type="button"
                 onClick={() => setReportType('detalhado')}
-                className={`py-1.5 rounded-md font-bold text-center cursor-pointer ${reportType === 'detalhado' ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300' : 'text-slate-500'}`}
+                className={`py-1.5 rounded-md font-bold text-center cursor-pointer transition-all ${reportType === 'detalhado' ? 'bg-white dark:bg-slate-700 text-blue-700 dark:text-blue-300 shadow-xs' : 'text-slate-500'}`}
               >
                 Detalhado
               </button>
@@ -216,11 +324,33 @@ export const RelatoriosTab: React.FC<RelatoriosTabProps> = ({
           </div>
 
           <div>
-            <label className="font-bold block mb-1">Status</label>
+            <label className="font-bold block mb-1 text-slate-700 dark:text-slate-300">Layout PDF</label>
+            <div className="grid grid-cols-2 gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setPdfOrientation('portrait')}
+                className={`py-1.5 rounded-md font-bold text-center cursor-pointer transition-all ${pdfOrientation === 'portrait' ? 'bg-white dark:bg-slate-700 text-rose-700 dark:text-rose-300 shadow-xs' : 'text-slate-500'}`}
+                title="Orientação vertical tradicional (A4 Retrato)"
+              >
+                Retrato
+              </button>
+              <button
+                type="button"
+                onClick={() => setPdfOrientation('landscape')}
+                className={`py-1.5 rounded-md font-bold text-center cursor-pointer transition-all ${pdfOrientation === 'landscape' ? 'bg-white dark:bg-slate-700 text-rose-700 dark:text-rose-300 shadow-xs' : 'text-slate-500'}`}
+                title="Orientação horizontal ampla (A4 Paisagem, recomendado para detalhado)"
+              >
+                Paisagem
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="font-bold block mb-1 text-slate-700 dark:text-slate-300">Status</label>
             <select
               value={reportStatus}
               onChange={(e) => setReportStatus(e.target.value)}
-              className="w-full p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+              className="w-full p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
             >
               <option value="todos">Todos os Status</option>
               {ACTION_STATUSES.map(s => (
@@ -230,11 +360,11 @@ export const RelatoriosTab: React.FC<RelatoriosTabProps> = ({
           </div>
 
           <div>
-            <label className="font-bold block mb-1">Responsável</label>
+            <label className="font-bold block mb-1 text-slate-700 dark:text-slate-300">Responsável</label>
             <select
               value={reportResponsavel}
               onChange={(e) => setReportResponsavel(e.target.value)}
-              className="w-full p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+              className="w-full p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
             >
               <option value="todos">Todos os Responsáveis</option>
               {responsaveisList.map(r => (
@@ -244,13 +374,49 @@ export const RelatoriosTab: React.FC<RelatoriosTabProps> = ({
           </div>
 
           <div>
-            <label className="font-bold block mb-1">Data Inicial</label>
-            <input
-              type="date"
-              value={reportDateStart}
-              onChange={(e) => setReportDateStart(e.target.value)}
-              className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-            />
+            <label className="font-bold block mb-1 text-slate-700 dark:text-slate-300">Período (De / Até)</label>
+            <div className="grid grid-cols-2 gap-1.5">
+              <input
+                type="date"
+                value={reportDateStart}
+                onChange={(e) => setReportDateStart(e.target.value)}
+                placeholder="Início"
+                className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-[11px]"
+              />
+              <input
+                type="date"
+                value={reportDateEnd}
+                onChange={(e) => setReportDateEnd(e.target.value)}
+                placeholder="Fim"
+                className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-[11px]"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Informative summary bar */}
+        <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-800 text-[11px]">
+          <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
+            <span className="font-bold text-slate-900 dark:text-white">
+              {reportActions.length} demanda(s) selecionada(s)
+            </span>
+            <span>•</span>
+            <span className="text-slate-500">Agendadas: {statusStats['Agendado'] || 0}</span>
+            <span>•</span>
+            <span className="text-slate-500">Em andamento: {statusStats['Em andamento'] || 0}</span>
+            <span>•</span>
+            <span className="text-slate-500">Concluídas: {statusStats['Concluído'] || 0}</span>
+            {statusStats['Cancelado'] > 0 && (
+              <>
+                <span>•</span>
+                <span className="text-rose-600 dark:text-rose-400">Canceladas: {statusStats['Cancelado']}</span>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+            <FileCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>PDF oficial pronto para download ({pdfOrientation === 'portrait' ? 'Retrato A4' : 'Paisagem A4'})</span>
           </div>
         </div>
       </div>

@@ -701,6 +701,7 @@ export default function App() {
           <RelatoriosTab
             acoes={acoes}
             secretarias={secretarias}
+            layoutConfig={layoutConfig}
             getStatusBadge={getStatusBadge}
             onToast={showToast}
             onLogAudit={logAudit}
