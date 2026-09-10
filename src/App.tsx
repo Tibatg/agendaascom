@@ -61,11 +61,13 @@ export default function App() {
 
   /* Core Municipal State with LocalStorage Caching */
   const [secretarias, setSecretarias] = useState<Secretariat[]>(() => {
+    if (isSupabaseConfigured) return [];
     const cached = localStorage.getItem('cal_acoes_secretarias');
     return cached ? JSON.parse(cached) : INITIAL_SECRETARIAS;
   });
 
   const [acoes, setAcoes] = useState<MunicipalAction[]>(() => {
+    if (isSupabaseConfigured) return [];
     const cached = localStorage.getItem('cal_acoes_data');
     return cached ? JSON.parse(cached) : INITIAL_ACTIONS;
   });
@@ -170,14 +172,14 @@ export default function App() {
       try {
         const remote = await fetchRemoteData();
         if (disposed) return;
-        if (remote.secretarias.length) setSecretarias(remote.secretarias);
+        setSecretarias(remote.secretarias);
         setAcoes(remote.acoes);
         setAuditLogs(remote.auditLogs);
         setLastSyncDate(new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }));
         setRemoteReady(true);
       } catch (error) {
         if (!disposed) {
-          setRemoteReady(true);
+          setRemoteReady(false);
           showToast(error instanceof Error ? error.message : 'Não foi possível carregar os dados do Supabase.', 'error');
         }
       }
@@ -452,6 +454,11 @@ export default function App() {
 
     logAudit('Ação excluída', actionToDelete.titulo, 'DELETE');
     setAcoes(prev => prev.filter(a => a.id !== actionToDelete.id));
+    if (isSupabaseConfigured) {
+      void deleteAcao(actionToDelete.id).catch((error) => {
+        showToast(error instanceof Error ? error.message : 'Não foi possível excluir a ação no Supabase.', 'error');
+      });
+    }
     setDeleteConfirmModalOpen(false);
     setActionDetailModalOpen(false);
     setDayDetailsModalOpen(false);
