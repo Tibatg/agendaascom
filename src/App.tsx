@@ -47,6 +47,7 @@ import { LoginModal } from './components/modals/LoginModal';
 import { SecretariaModal } from './components/modals/SecretariaModal';
 import { DeleteConfirmModal } from './components/modals/DeleteConfirmModal';
 import { RestoreConfirmModal } from './components/modals/RestoreConfirmModal';
+import { fetchUsuariosFromSupabase, updateUsuarioPerfil, updateUsuarioStatus } from './lib/supabase';
 
 export default function App() {
   /* Navigation Tab */
@@ -247,22 +248,53 @@ export default function App() {
   };
 
   /* Sync Handler */
-  const handleSync = () => {
+  const handleSync = async () => {
+    if (isSyncing) return;
     setIsSyncing(true);
-    setTimeout(() => {
-      const now = new Date();
-      const d = String(now.getDate()).padStart(2, '0');
-      const m = String(now.getMonth() + 1).padStart(2, '0');
-      const y = now.getFullYear();
-      const h = String(now.getHours()).padStart(2, '0');
-      const min = String(now.getMinutes()).padStart(2, '0');
-      const formatted = `${d}/${m}/${y} ${h}:${min}`;
-      
+
+    try {
+      const remoteUsers = await fetchUsuariosFromSupabase();
+      const syncedUsers: UserProfile[] = remoteUsers.map(user => ({
+        id: user.id,
+        nome: user.nome,
+        email: user.email,
+        perfil: user.perfil,
+        secretaria_id: user.secretaria_id || undefined,
+        ativo: user.ativo,
+        ultimo_acesso: user.ultimo_acesso ? new Date(user.ultimo_acesso).toLocaleString('pt-BR') : 'Nunca acessou',
+        observacoes: user.observacoes || undefined,
+      }));
+
+      setUsuarios(syncedUsers);
+      const formatted = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
       setLastSyncDate(formatted);
+      logAudit('Sincronização de usuários', 'Supabase Auth + public.usuarios', 'SYNC', `${syncedUsers.length} usuários carregados`);
+      showToast(`${syncedUsers.length} usuário(s) sincronizado(s) do Supabase.`, 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro inesperado durante a sincronização.';
+      showToast(message, 'error');
+    } finally {
       setIsSyncing(false);
-      logAudit('Sincronização em tempo real', 'Base de dados e Cache', 'SYNC', `Horário: ${formatted}`);
-      showToast('Sincronização concluída com sucesso!', 'success');
-    }, 800);
+    }
+  };
+
+  const handleUpdateUser = async (user: UserProfile) => {
+    try {
+      await updateUsuarioPerfil({
+        id: user.id,
+        nome: user.nome,
+        email: user.email,
+        perfil: user.perfil,
+        secretaria_id: user.secretaria_id || null,
+        ativo: user.ativo,
+        ultimo_acesso: user.ultimo_acesso || null,
+        observacoes: user.observacoes || null,
+      });
+      setUsuarios(previous => previous.map(item => item.id === user.id ? user : item));
+      showToast(`Usuário ${user.nome} atualizado.`, 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Não foi possível atualizar o usuário.', 'error');
+    }
   };
 
   /* Action Handlers */
@@ -445,16 +477,19 @@ export default function App() {
     logAudit('Usuário adicionado', user.nome, 'PERMISSION', `Perfil: ${user.perfil}`);
   };
 
-  const handleToggleUserStatus = (userId: string) => {
-    setUsuarios(prev => prev.map(u => {
-      if (u.id === userId) {
-        const next = !u.ativo;
-        logAudit('Status de usuário alterado', u.nome, 'PERMISSION', next ? 'Ativo' : 'Inativo');
-        showToast(`Usuário ${u.nome} ${next ? 'ativado' : 'desativado'}.`, 'info');
-        return { ...u, ativo: next };
-      }
-      return u;
-    }));
+  const handleToggleUserStatus = async (userId: string) => {
+    const user = usuarios.find(item => item.id === userId);
+    if (!user) return;
+    const next = !user.ativo;
+
+    try {
+      await updateUsuarioStatus(userId, next);
+      setUsuarios(prev => prev.map(item => item.id === userId ? { ...item, ativo: next } : item));
+      logAudit('Status de usuário alterado', user.nome, 'PERMISSION', next ? 'Ativo' : 'Inativo');
+      showToast(`Usuário ${user.nome} ${next ? 'ativado' : 'desativado'}.`, 'info');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Não foi possível atualizar o status.', 'error');
+    }
   };
 
   /* Restore Backup Handler */
@@ -723,9 +758,9 @@ export default function App() {
           <UsuariosTab
             usuarios={usuarios}
             secretarias={secretarias}
-            onAddUser={handleAddUser}
-            onUpdateUser={() => {}}
-            onToggleUserStatus={handleToggleUserStatus}
+  onAddUser={handleAddUser}
+  onUpdateUser={handleUpdateUser}
+  onToggleUserStatus={handleToggleUserStatus}
             onToast={showToast}
           />
         )}
