@@ -47,7 +47,7 @@ import { LoginModal } from './components/modals/LoginModal';
 import { SecretariaModal } from './components/modals/SecretariaModal';
 import { DeleteConfirmModal } from './components/modals/DeleteConfirmModal';
 import { RestoreConfirmModal } from './components/modals/RestoreConfirmModal';
-import { fetchUsuariosFromSupabase, signInWithSupabase, updateUsuarioPerfil, updateUsuarioStatus } from './lib/supabase';
+import { deleteAcao, fetchRemoteData, fetchUsuariosFromSupabase, getCurrentSessionUser, isSupabaseConfigured, persistAllRemote, persistSessionLog, signInWithSupabase, subscribeToRemoteChanges, toUserProfile, updateUsuarioPerfil, updateUsuarioStatus, upsertAcao, upsertAuditoria, upsertSecretaria } from './lib/supabase';
 
 export default function App() {
   /* Navigation Tab */
@@ -57,14 +57,17 @@ export default function App() {
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastSyncDate, setLastSyncDate] = useState<string>('10/09/2026 16:14');
+  const [remoteReady, setRemoteReady] = useState<boolean>(!isSupabaseConfigured);
 
   /* Core Municipal State with LocalStorage Caching */
   const [secretarias, setSecretarias] = useState<Secretariat[]>(() => {
+    if (isSupabaseConfigured) return [];
     const cached = localStorage.getItem('cal_acoes_secretarias');
     return cached ? JSON.parse(cached) : INITIAL_SECRETARIAS;
   });
 
   const [acoes, setAcoes] = useState<MunicipalAction[]>(() => {
+    if (isSupabaseConfigured) return [];
     const cached = localStorage.getItem('cal_acoes_data');
     return cached ? JSON.parse(cached) : INITIAL_ACTIONS;
   });
@@ -161,6 +164,44 @@ export default function App() {
     };
   }, []);
 
+  /* Supabase is the source of truth; localStorage remains only as a temporary offline cache. */
+  useEffect(() => {
+    let disposed = false;
+    const loadRemoteData = async () => {
+      if (!isSupabaseConfigured) return;
+      try {
+        const remote = await fetchRemoteData();
+        if (disposed) return;
+        setSecretarias(remote.secretarias);
+        setAcoes(remote.acoes);
+        setAuditLogs(remote.auditLogs);
+        setLastSyncDate(new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }));
+        setRemoteReady(true);
+      } catch (error) {
+        if (!disposed) {
+          setRemoteReady(false);
+          showToast(error instanceof Error ? error.message : 'Não foi possível carregar os dados do Supabase.', 'error');
+        }
+      }
+    };
+    void loadRemoteData();
+    const unsubscribe = subscribeToRemoteChanges(() => { void loadRemoteData(); });
+    return () => { disposed = true; unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    if (!remoteReady || !isSupabaseConfigured) return;
+    const timer = window.setTimeout(() => {
+      void getCurrentSessionUser().then((user) => {
+        if (!user) return;
+        void persistAllRemote(secretarias, acoes).catch((error) => {
+          showToast(error instanceof Error ? error.message : 'Não foi possível salvar no Supabase.', 'error');
+        });
+      });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [remoteReady, secretarias, acoes, auditLogs]);
+
   /* User Permissions */
   const isSuperAdmin = currentUser.perfil === 'Administrador';
   const isEditor = currentUser.perfil === 'Editor';
@@ -198,6 +239,7 @@ export default function App() {
       created_at: nowStr
     };
     setAuditLogs(prev => [newLog, ...prev]);
+    if (isSupabaseConfigured) void persistSessionLog(newLog);
   };
 
   /* Authentication Handlers */
@@ -412,6 +454,11 @@ export default function App() {
 
     logAudit('Ação excluída', actionToDelete.titulo, 'DELETE');
     setAcoes(prev => prev.filter(a => a.id !== actionToDelete.id));
+    if (isSupabaseConfigured) {
+      void deleteAcao(actionToDelete.id).catch((error) => {
+        showToast(error instanceof Error ? error.message : 'Não foi possível excluir a ação no Supabase.', 'error');
+      });
+    }
     setDeleteConfirmModalOpen(false);
     setActionDetailModalOpen(false);
     setDayDetailsModalOpen(false);
