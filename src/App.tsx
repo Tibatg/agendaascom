@@ -47,7 +47,7 @@ import { LoginModal } from './components/modals/LoginModal';
 import { SecretariaModal } from './components/modals/SecretariaModal';
 import { DeleteConfirmModal } from './components/modals/DeleteConfirmModal';
 import { RestoreConfirmModal } from './components/modals/RestoreConfirmModal';
-import { fetchUsuariosFromSupabase, updateUsuarioPerfil, updateUsuarioStatus } from './lib/supabase';
+import { fetchUsuariosFromSupabase, signInWithSupabase, updateUsuarioPerfil, updateUsuarioStatus } from './lib/supabase';
 
 export default function App() {
   /* Navigation Tab */
@@ -201,31 +201,36 @@ export default function App() {
   };
 
   /* Authentication Handlers */
-  const handleLogin = (email: string, pass: string): boolean => {
-    const emailTrim = email.trim().toLowerCase();
-    const passTrim = pass.trim();
+  const handleLogin = async (email: string, pass: string): Promise<boolean> => {
+    try {
+      await signInWithSupabase(email.trim().toLowerCase(), pass);
+      const remoteUsers = await fetchUsuariosFromSupabase();
+      const signedInUser = remoteUsers.find(user => user.email.toLowerCase() === email.trim().toLowerCase());
+      if (!signedInUser) {
+        showToast('Sua conta autenticou, mas ainda não possui perfil em public.usuarios.', 'error');
+        return false;
+      }
 
-    if (emailTrim === 'ascomitapecuru@gmail.com' && (passTrim === 'ascom@2026' || passTrim === 'admin')) {
-      const adminUser = usuarios.find(u => u.perfil === 'Administrador') || INITIAL_USERS[0];
-      const updated = { ...adminUser, ultimo_acesso: new Date().toISOString().replace('T', ' ').slice(0, 16) };
+      const updated: UserProfile = {
+        id: signedInUser.id,
+        nome: signedInUser.nome,
+        email: signedInUser.email,
+        perfil: signedInUser.perfil,
+        secretaria_id: signedInUser.secretaria_id || undefined,
+        ativo: signedInUser.ativo,
+        ultimo_acesso: signedInUser.ultimo_acesso ? new Date(signedInUser.ultimo_acesso).toLocaleString('pt-BR') : 'Nunca acessou',
+        observacoes: signedInUser.observacoes || undefined,
+      };
+      setUsuarios(remoteUsers.map(user => ({ ...user, secretaria_id: user.secretaria_id || undefined, ultimo_acesso: user.ultimo_acesso ? new Date(user.ultimo_acesso).toLocaleString('pt-BR') : 'Nunca acessou', observacoes: user.observacoes || undefined })));
       setCurrentUser(updated);
       setLoginModalOpen(false);
-      logAudit('Login efetuado', 'Sessão iniciada', 'AUTH', 'Perfil: Administrador Geral');
-      showToast(`Bem-vindo, ${updated.nome}! Acesso administrativo liberado.`, 'success');
+      logAudit('Login efetuado', 'Sessão iniciada', 'AUTH', `Perfil: ${updated.perfil}`);
+      showToast(`Bem-vindo, ${updated.nome}!`, 'success');
       return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Não foi possível autenticar no Supabase.', 'error');
+      return false;
     }
-
-    if ((emailTrim === 'editor@itapecuru.gov.br' || emailTrim === 'ascomitapecuru@gmail.com') && (passTrim === 'editor@2026' || passTrim === 'editor')) {
-      const editorUser = usuarios.find(u => u.perfil === 'Editor') || INITIAL_USERS[1];
-      const updated = { ...editorUser, ultimo_acesso: new Date().toISOString().replace('T', ' ').slice(0, 16) };
-      setCurrentUser(updated);
-      setLoginModalOpen(false);
-      logAudit('Login efetuado', 'Sessão iniciada', 'AUTH', 'Perfil: Editor Setorial');
-      showToast(`Bem-vindo, ${editorUser.nome}! Modo de edição ativado.`, 'success');
-      return true;
-    }
-
-    return false;
   };
 
   const handleQuickLogin = (role: 'Administrador' | 'Editor') => {

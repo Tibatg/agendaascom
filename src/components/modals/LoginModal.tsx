@@ -6,7 +6,7 @@ interface LoginModalProps {
   isOpen: boolean;
   intentMessage: string;
   onClose: () => void;
-  onLogin: (email: string, pass: string) => boolean;
+  onLogin: (email: string, pass: string) => Promise<boolean>;
   onQuickLogin: (role: 'Administrador' | 'Editor') => void;
 }
 
@@ -23,10 +23,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    const success = onLogin(email, password);
+    const success = await onLogin(email, password);
     if (!success) {
       setError('Credenciais incorretas. Verifique seu e-mail e senha institucional.');
     }
