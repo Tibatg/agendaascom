@@ -1,0 +1,6 @@
+{
+  "name": "Calendário de Ações",
+  "description": "Sistema Integrado de Gestão e Planejamento Municipal das Secretarias Municipais",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
