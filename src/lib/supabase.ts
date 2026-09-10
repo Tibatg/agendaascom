@@ -22,6 +22,13 @@ export interface SupabaseUsuarioRow {
   observacoes: string | null;
 }
 
+export async function signInWithSupabase(email: string, password: string) {
+  if (!supabase) throw new Error('Supabase não configurado. Defina as variáveis VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY.');
+
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw new Error('Não foi possível entrar no Supabase. Confira o e-mail, a senha e se o e-mail foi confirmado.');
+}
+
 export async function fetchUsuariosFromSupabase(): Promise<SupabaseUsuarioRow[]> {
   if (!supabase) throw new Error('Supabase não configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY.');
 
